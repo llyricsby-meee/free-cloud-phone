@@ -1,0 +1,49 @@
+name: Free Cloud Android Phone With PlayStore
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils xfce4 xfce4-goodies tightvncserver websockify jq
+        
+    - name: Download Google Play Android Image
+      run: |
+        sudo apt install -y android-sdk
+        echo "yes" | sdkmanager "system-images;android-30;google_apis_playstore;x86_64" --sdk_root=$ANDROID_HOME
+        echo "no" | avdmanager create avd -n CloudPhone -k "system-images;android-30;google_apis_playstore;x86_64" --force
+
+    - name: Setup Ngrok
+      run: |
+        curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+        echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+        sudo apt update && sudo apt install ngrok
+        ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+
+    - name: Start Android Emulator & Web Access
+      run: |
+        mkdir -p ~/.vnc
+        echo "cloud123" | vncpasswd -f > ~/.vnc/passwd
+        chmod 600 ~/.vnc/passwd
+        tightvncserver :1 -geometry 1280x720 -depth 24
+        websockify --web /usr/share/novnc/ 6080 localhost:5901 &
+        
+        export DISPLAY=:1
+        $ANDROID_HOME/emulator/emulator -avd CloudPhone -no-audio -no-boot-anim -gpu swiftshader_indirect &
+        
+        ngrok http 6080 --log=stdout > /dev/null &
+        
+        echo "=== Server starting... ==="
+        sleep 20
+        curl --silent http://127.0.0.1:4040/api/tunnels | jq '.tunnels[0].public_url'
+
+    - name: Keep Server Alive (6 Hours)
+      run: sleep 21600
