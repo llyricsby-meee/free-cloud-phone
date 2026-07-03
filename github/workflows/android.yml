@@ -1,7 +1,7 @@
-name: Free Cloud Android Phone
+name: Free Cloud Android Phone With PlayStore
 
 on:
-  workflow_dispatch: # इससे आप जब चाहें बटन दबाकर इसे चालू कर पाएंगे
+  workflow_dispatch:
 
 jobs:
   build:
@@ -10,12 +10,20 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
 
-    - name: Install Android Emulator & Tools
+    - name: Install System Dependencies
       run: |
         sudo apt update
-        # एंड्रॉइड टूल्स और VNC (स्क्रीन देखने के लिए) इंस्टॉल करना
-        sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils xfce4 xfce4-goodies tightvncserver websockify
+        sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils xfce4 xfce4-goodies tightvncserver websockify jq
         
+    - name: Download Google Play Android Image
+      run: |
+        # यहाँ बैकएंड में प्ले स्टोर वाली एंड्रॉइड इमेज और SDK टूल्स सेटअप हो रहे हैं
+        sudo apt install -y android-sdk
+        echo "=== प्ले स्टोर वाला एंड्रॉइड सिस्टम डाउनलोड हो रहा है... ==="
+        # यह कमांड प्ले स्टोर सपोर्टेड एंड्रॉइड 11 (API 30) डाउनलोड करेगी
+        sdkmanager "system-images;android-30;google_apis_playstore;x86_64" --sdk_root=$ANDROID_HOME
+        echo "no" | avdmanager create avd -n CloudPhone -k "system-images;android-30;google_apis_playstore;x86_64" --force
+
     - name: Setup Ngrok
       run: |
         curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
@@ -23,23 +31,25 @@ jobs:
         sudo apt update && sudo apt install ngrok
         ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
-    - name: Start Android Server & Stream
+    - name: Start Android Emulator & Web Access
       run: |
-        # यहाँ बैकएंड में एंड्रॉइड एमुलेटर और VNC सर्वर को चालू किया जा रहा है
+        # डिस्प्ले और वीएनसी सर्वर चालू करना
         mkdir -p ~/.vnc
         echo "cloud123" | vncpasswd -f > ~/.vnc/passwd
         chmod 600 ~/.vnc/passwd
         tightvncserver :1 -geometry 1280x720 -depth 24
-        
-        # वेब ब्राउज़र में देखने के लिए पोर्ट 6080 पर चालू करना
         websockify --web /usr/share/novnc/ 6080 localhost:5901 &
         
-        # Ngrok के जरिए इंटरनेट पर लिंक लाइव करना
+        # प्ले स्टोर वाले एंड्रॉइड एमुलेटर को बैकएंड में रन करना
+        export DISPLAY=:1
+        $ANDROID_HOME/emulator/emulator -avd CloudPhone -no-audio -no-boot-anim -gpu swiftshader_indirect &
+        
+        # Ngrok टनल चालू करना ताकि आप ब्राउज़र में देख सकें
         ngrok http 6080 --log=stdout > /dev/null &
         
-        echo "=== आपका क्लाउड फोन शुरू हो रहा है... अगले स्टेप में लिंक देखें ==="
-        sleep 10
+        echo "=== आपका प्ले स्टोर वाला क्लाउड फोन तैयार है! ==="
+        sleep 15
         curl --silent http://127.0.0.1:4040/api/tunnels | jq '.tunnels[0].public_url'
 
     - name: Keep Server Alive (6 Hours)
-      run: sleep 21600 # सर्वर को 6 घंटे तक चालू रखेगा
+      run: sleep 21600
